@@ -7,7 +7,7 @@ import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, upda
 const appId = 'nexus-chat-live-version'; 
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBpnba2Hya1KD4ron5W3n0BMfx-VIo_IME",
+  apiKey: "AIzaSyBpnba2Hya1KD4ron5W3m0BMfx-VIo_IME",
   authDomain: "nexus-chat-12276.firebaseapp.com",
   projectId: "nexus-chat-12276",
   storageBucket: "nexus-chat-12276.firebasestorage.app",
