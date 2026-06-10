@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, arrayUnion } from 'firebase/firestore';
 
 // Global uygulama kimlikleri ve Firebase Yapılandırması
 const appId = 'nexus-chat-live-version'; 
@@ -54,7 +54,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [newServerName, setNewServerName] = useState('');
   const [newChannelName, setNewChannelName] = useState('');
-  const [joinInviteCode, setJoinInviteCode] = useState(''); // Davet Kodu Girdisi
+  const [joinInviteCode, setJoinInviteCode] = useState('');
   
   // Profil Düzenleme
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -64,7 +64,7 @@ export default function App() {
   // Arayüz Kontrolleri
   const [showNewServerModal, setShowNewServerModal] = useState(false);
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
-  const [showJoinServerModal, setShowJoinServerModal] = useState(false); // Katılma Modalı
+  const [showJoinServerModal, setShowJoinServerModal] = useState(false);
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
@@ -347,19 +347,19 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
-  // --- SUNUCU OLUŞTURMA (KOD ÜRETİMİ EKLENDİ) ---
+  // --- SUNUCU İŞLEMLERİ ---
   const handleCreateServer = async (e) => {
     e.preventDefault();
     if (!newServerName.trim() || !currentUserProfile) return;
     try {
-      const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase(); // Rastgele Kod Üretimi
+      const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'servers'), {
         name: newServerName.trim(),
         icon: newServerName.trim().substring(0, 2).toUpperCase(),
         ownerId: currentUserProfile.uid,
         channels: [{ id: 'genel', name: 'genel' }],
-        inviteCode: inviteCode, // Kodu kaydet
-        members: [currentUserProfile.uid] // Kuran kişiyi üyeler listesine ekle
+        inviteCode: inviteCode, 
+        members: [currentUserProfile.uid] 
       });
       setNewServerName(''); setShowNewServerModal(false);
       setActiveTab(`server-${docRef.id}`); setActiveChannelId('genel');
@@ -368,7 +368,6 @@ export default function App() {
     } catch (err) {}
   };
 
-  // --- SUNUCUYA KATILMA (KOD İLE) ---
   const handleJoinServer = async (e) => {
     e.preventDefault();
     const code = joinInviteCode.trim().toUpperCase();
@@ -399,6 +398,24 @@ export default function App() {
     }
   };
 
+  // SUNUCU SİLME (SADECE KURUCU)
+  const handleDeleteServer = async () => {
+    if (!activeServer || activeServer.ownerId !== currentUserProfile?.uid) return;
+    
+    if (!window.confirm(`"${activeServer.name}" ağını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz!`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'servers', activeServer.id));
+      setActiveTab('home');
+      setActiveChannelId('genel');
+      showNotification("Ağ başarıyla silindi.", "success");
+    } catch (err) {
+      showNotification("Ağ silinirken bir hata oluştu.", "error");
+    }
+  };
+
   const handleCreateChannel = async (e) => {
     e.preventDefault();
     const chName = newChannelName.trim().toLowerCase().replace(/\s+/g, '-');
@@ -415,6 +432,7 @@ export default function App() {
     } catch (err) {}
   };
 
+  // --- MESAJ İŞLEMLERİ (HERKESTEN SİL & BENDEN SİL EKLENDİ) ---
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!messageText.trim() || !currentUserProfile) return;
@@ -428,17 +446,30 @@ export default function App() {
         senderDisplayName: currentUserProfile.displayName,
         senderAvatar: currentUserProfile.avatar,
         text: messageText.trim(),
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        deletedFor: [] // Başlangıçta kimse silmemiş
       });
       setMessageText('');
     } catch (err) { showNotification("Mesaj iletilemedi", "error"); }
   };
 
-  const handleDeleteMessage = async (msgId) => {
-    if (!window.confirm("Bu mesajı silmek istediğine emin misin?")) return;
+  // SADECE BENDEN SİL
+  const handleDeleteForMe = async (msgId) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId), {
+        deletedFor: arrayUnion(currentUserProfile.uid)
+      });
+    } catch (err) {
+      showNotification("Mesaj ekranınızdan kaldırılamadı.", "error");
+    }
+  };
+
+  // HERKESTEN SİL (KÖKTEN)
+  const handleDeleteForAll = async (msgId) => {
+    if (!window.confirm("Bu mesajı herkesten silmek istediğine emin misin?")) return;
     try {
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId));
-      showNotification("Mesaj silindi.", "info");
+      showNotification("Mesaj herkesten silindi.", "info");
     } catch (err) {
       showNotification("Mesaj silinemedi.", "error");
     }
@@ -460,6 +491,7 @@ export default function App() {
     }
   };
 
+  // --- ARKADAŞLIK SİSTEMİ ---
   const sendFriendRequest = async (targetUser) => {
     if (!currentUserProfile) return;
     const isAlreadyFriend = currentUserProfile.friends?.includes(targetUser.uid);
@@ -506,16 +538,18 @@ export default function App() {
     sent: allFriendRequests.filter(r => r.fromUid === currentUserProfile?.uid && r.status === 'pending')
   }), [allFriendRequests, currentUserProfile]);
   
-  // SUNUCU LİSTESİNİ KİŞİYE GÖRE FİLTRELEME
   const myServersList = useMemo(() => {
     if (!currentUserProfile) return [];
     return allServers.filter(s => !s.members || s.members.includes(currentUserProfile.uid));
   }, [allServers, currentUserProfile]);
 
   const activeChatMessages = useMemo(() => {
-    if (activeTab.startsWith('server-')) return allMessages.filter(m => m.serverId === activeTab.replace('server-', '') && m.channelId === activeChannelId);
-    if (activeTab === 'home' && activeDmRecipient) return allMessages.filter(m => m.serverId === 'dm' && ((m.senderId === currentUserProfile?.uid && m.channelId === activeDmRecipient.uid) || (m.senderId === activeDmRecipient.uid && m.channelId === currentUserProfile?.uid)));
-    return [];
+    let msgs = [];
+    if (activeTab.startsWith('server-')) msgs = allMessages.filter(m => m.serverId === activeTab.replace('server-', '') && m.channelId === activeChannelId);
+    if (activeTab === 'home' && activeDmRecipient) msgs = allMessages.filter(m => m.serverId === 'dm' && ((m.senderId === currentUserProfile?.uid && m.channelId === activeDmRecipient.uid) || (m.senderId === activeDmRecipient.uid && m.channelId === currentUserProfile?.uid)));
+    
+    // "Benden sil" diyenleri o mesaji görmekten men et
+    return msgs.filter(m => !(m.deletedFor && m.deletedFor.includes(currentUserProfile?.uid)));
   }, [allMessages, activeTab, activeChannelId, activeDmRecipient, currentUserProfile]);
   
   const activeServer = activeTab.startsWith('server-') ? allServers.find(s => s.id === activeTab.replace('server-', '')) : null;
@@ -780,6 +814,17 @@ export default function App() {
                   Kod: {activeServer.inviteCode}
                 </button>
               )}
+
+              {/* AĞ SİLME BUTONU (SADECE KURUCUYA) */}
+              {activeServer?.ownerId === currentUserProfile?.uid && (
+                <button 
+                  onClick={handleDeleteServer}
+                  className="ml-2 p-1.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg text-rose-400 hover:text-rose-300 transition-all active:scale-95"
+                  title="Ağı Sil (Sadece Kurucu)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -876,16 +921,30 @@ export default function App() {
                         )}
                       </div>
 
-                      {msg.senderId === currentUserProfile?.uid && !editingMessageId && (
+                      {/* YENİ MESAJ MENÜSÜ */}
+                      {!editingMessageId && (
                         <div className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 flex items-center gap-1 bg-[#161619]/90 backdrop-blur-sm p-1 rounded-lg border border-white/5 transition-opacity duration-200">
-                          <button onClick={() => { setEditingMessageId(msg.id); setEditMessageText(msg.text); }} className="p-1.5 text-zinc-400 hover:text-indigo-400 hover:bg-white/5 rounded-md transition-all" title="Düzenle">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                          
+                          {/* Sadece Kendi Mesajlarında Çıkanlar */}
+                          {msg.senderId === currentUserProfile?.uid && (
+                            <>
+                              <button onClick={() => { setEditingMessageId(msg.id); setEditMessageText(msg.text); }} className="p-1.5 text-zinc-400 hover:text-indigo-400 hover:bg-white/5 rounded-md transition-all" title="Düzenle">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                              </button>
+                              <button onClick={() => handleDeleteForAll(msg.id)} className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-white/5 rounded-md transition-all" title="Herkesten Sil">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                              </button>
+                            </>
+                          )}
+                          
+                          {/* Herkesin Kendi Ekranından Silebilmesi İçin */}
+                          <button onClick={() => handleDeleteForMe(msg.id)} className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-white/5 rounded-md transition-all" title="Sadece Benden Sil">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
                           </button>
-                          <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-white/5 rounded-md transition-all" title="Sil">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                          </button>
+
                         </div>
                       )}
+
                     </div>
                   ))}
                   <div ref={messagesEndRef} />
@@ -981,7 +1040,7 @@ export default function App() {
         </div>
       )}
 
-      {/* AĞA KATILMA MODALI (YENİ) */}
+      {/* AĞA KATILMA MODALI */}
       {showJoinServerModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative">
