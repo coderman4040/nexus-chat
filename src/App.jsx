@@ -66,6 +66,10 @@ export default function App() {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
+  // Mesaj Düzenleme Kontrolleri
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editMessageText, setEditMessageText] = useState('');
+
   const messagesEndRef = useRef(null);
 
   const showNotification = (message, type = 'info') => {
@@ -265,7 +269,6 @@ export default function App() {
     }
   };
 
-  // DİĞER KULLANICI FONKSİYONLARI
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     if (!currentUserProfile || !user) return;
@@ -306,7 +309,6 @@ export default function App() {
     reader.onload = (event) => {
       const img = new Image();
       img.onload = () => {
-        // Veritabanı sınırlarını aşmamak için resmi küçültüyoruz
         const canvas = document.createElement('canvas');
         const MAX_SIZE = 256;
         let width = img.width;
@@ -329,7 +331,6 @@ export default function App() {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Küçültülmüş resmi base64 formatına çevirip duruma kaydediyoruz
         const base64String = canvas.toDataURL('image/jpeg', 0.8);
         setEditAvatarUrl(base64String);
       };
@@ -394,6 +395,33 @@ export default function App() {
       });
       setMessageText('');
     } catch (err) { showNotification("Mesaj iletilemedi", "error"); }
+  };
+
+  // --- YENİ: MESAJ SİLME VE DÜZENLEME FONKSİYONLARI ---
+  const handleDeleteMessage = async (msgId) => {
+    if (!window.confirm("Bu mesajı silmek istediğine emin misin?")) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId));
+      showNotification("Mesaj silindi.", "info");
+    } catch (err) {
+      showNotification("Mesaj silinemedi.", "error");
+    }
+  };
+
+  const handleEditMessage = async (e) => {
+    e.preventDefault();
+    if (!editMessageText.trim() || !editingMessageId) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', editingMessageId), {
+        text: editMessageText.trim(),
+        isEdited: true
+      });
+      setEditingMessageId(null);
+      setEditMessageText('');
+      showNotification("Mesaj düzenlendi.", "success");
+    } catch (err) {
+      showNotification("Mesaj düzenlenemedi.", "error");
+    }
   };
 
   const sendFriendRequest = async (targetUser) => {
@@ -464,11 +492,9 @@ export default function App() {
   if (!currentUserProfile) {
     return (
       <div className="h-screen w-full flex items-center justify-center bg-[#09090b] relative font-sans text-zinc-100 overflow-hidden px-4">
-        {/* Dekoratif Glowlar */}
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-purple-600/20 rounded-full blur-[120px] pointer-events-none"></div>
         <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-indigo-600/20 rounded-full blur-[120px] pointer-events-none"></div>
 
-        {/* Bildirimler */}
         <div className="absolute top-4 left-4 right-4 md:right-6 md:left-auto md:w-80 z-50 flex flex-col gap-2">
           {notifications.map(n => (
             <div key={n.id} className="px-4 py-3 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.5)] text-sm border border-white/10 backdrop-blur-md flex items-center gap-2 bg-[#18181b]/90 animate-bounce">
@@ -485,7 +511,6 @@ export default function App() {
           </div>
           <h2 className="text-3xl font-black text-center text-white tracking-widest mb-6">NEXUS</h2>
 
-          {/* KAYITLI HESAPLAR EKRANI */}
           {authMode === 'saved' && savedAccounts.length > 0 ? (
             <div className="animate-in fade-in zoom-in-95 duration-300">
               <p className="text-xs text-zinc-400 text-center mb-4 uppercase tracking-widest font-bold">Kayıtlı Hesaplar</p>
@@ -511,7 +536,6 @@ export default function App() {
               </button>
             </div>
           ) : (
-            /* NORMAL GİRİŞ / KAYIT EKRANI */
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
               <div className="flex bg-[#18181b] rounded-xl p-1 mb-6 border border-white/5">
                 <button onClick={() => setAuthMode('login')} className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${authMode === 'login' ? 'bg-zinc-800 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}>Giriş Yap</button>
@@ -556,11 +580,10 @@ export default function App() {
     );
   }
 
-  // ANA UYGULAMA (SADECE 1 KERE RENDER EDİLİR)
+  // ANA UYGULAMA
   return (
     <div className="h-screen w-full flex flex-col md:flex-row overflow-hidden bg-[#09090b] text-zinc-100 font-sans relative selection:bg-indigo-500/30 [&_*::-webkit-scrollbar]:w-1.5 [&_*::-webkit-scrollbar-track]:bg-transparent [&_*::-webkit-scrollbar-thumb]:bg-zinc-800">
       
-      {/* Bildirimler */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-4 z-[100] flex flex-col gap-2 w-[90%] md:w-auto pointer-events-none">
         {notifications.map(n => (
           <div key={n.id} className="px-4 py-3 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.8)] text-sm border border-white/10 backdrop-blur-xl flex items-center justify-center md:justify-start gap-2 bg-[#18181b]/95 animate-bounce pointer-events-auto text-center md:text-left">
@@ -569,15 +592,13 @@ export default function App() {
         ))}
       </div>
 
-      {/* MOBİL ARKA PLAN KARARTMASI */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-30" onClick={() => setIsMobileMenuOpen(false)}></div>
       )}
 
-      {/* --- SOL MENÜLER (SUNUCU VE KANALLAR) --- */}
+      {/* --- SOL MENÜLER --- */}
       <div className={`fixed md:relative inset-y-0 left-0 z-40 flex h-full transform transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         
-        {/* 1. SUNUCU SÜTUNU */}
         <div className="w-[70px] md:w-[80px] bg-[#0f0f13] flex flex-col items-center py-4 gap-3 flex-shrink-0 border-r border-white/5 relative shadow-[4px_0_24px_rgba(0,0,0,0.5)] z-20">
           <button 
             onClick={() => { setActiveTab('home'); setActiveDmRecipient(null); setIsMobileMenuOpen(false); }}
@@ -598,7 +619,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 2. KANAL/DM SÜTUNU */}
         <div className="w-[240px] bg-[#121214] flex flex-col h-full border-r border-white/5 z-10">
           <div className="h-14 border-b border-white/5 flex items-center px-4 font-extrabold text-white/90 shadow-sm bg-[#121214]/80 backdrop-blur-md">
             {activeTab === 'home' ? 'Merkez' : activeServer?.name}
@@ -648,7 +668,6 @@ export default function App() {
             )}
           </div>
 
-          {/* Kendi Profil Alt Çubuğu */}
           <div className="h-16 bg-[#0a0a0c] px-3 flex items-center justify-between border-t border-white/5 relative z-50">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="relative cursor-pointer transition-transform hover:scale-105" onClick={() => setStatusMenuOpen(!statusMenuOpen)}>
@@ -665,7 +684,6 @@ export default function App() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
             </button>
 
-            {/* Durum Menüsü */}
             {statusMenuOpen && (
               <div className="absolute bottom-16 left-2 w-48 bg-[#18181b] border border-white/10 rounded-2xl p-2 shadow-2xl z-[100]">
                 <button onClick={() => handleStatusChange('online')} className="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/5 rounded-xl text-sm font-medium"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />Çevrimiçi</button>
@@ -677,12 +695,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* --- 3. ANA İÇERİK ALANI (SOHBET/LİSTELER) --- */}
+      {/* --- ANA İÇERİK ALANI --- */}
       <div className="flex-1 flex flex-col bg-[#161619] relative min-w-0 h-full">
-        {/* Dekoratif Glow */}
         <div className="absolute top-0 right-0 w-64 h-64 md:w-96 md:h-96 bg-indigo-500/5 rounded-full blur-[80px] pointer-events-none"></div>
 
-        {/* Üst Bar */}
         <div className="h-14 border-b border-white/5 flex items-center px-4 shadow-sm flex-shrink-0 bg-[#161619]/80 backdrop-blur-md z-10 gap-3">
           
           <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 text-zinc-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
@@ -704,13 +720,11 @@ export default function App() {
           )}
         </div>
 
-        {/* İçerik Gövdesi */}
         <div className="flex-1 overflow-hidden flex z-10">
           <div className="flex-1 flex flex-col min-w-0">
             {activeTab === 'home' && !activeDmRecipient ? (
               <div className="flex-1 overflow-y-auto p-4 md:p-8">
                 
-                {/* Arkadaşlar */}
                 {homeSubTab === 'friends' && (
                   <div className="max-w-4xl mx-auto space-y-3">
                     {myFriendsList.length === 0 ? <p className="text-center text-zinc-500 mt-10">Listeniz boş.</p> : myFriendsList.map(friend => (
@@ -731,7 +745,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Arama */}
                 {homeSubTab === 'add-friend' && (
                   <div className="max-w-2xl mx-auto space-y-6">
                     <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Kullanıcı Adı veya İsim Yazınız" className="w-full bg-[#1c1c21] border border-white/10 rounded-2xl px-5 py-4 text-sm text-white focus:outline-none focus:border-indigo-500/50" />
@@ -752,7 +765,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* İstekler */}
                 {homeSubTab === 'requests' && (
                   <div className="max-w-2xl mx-auto space-y-6">
                     <div>
@@ -776,25 +788,46 @@ export default function App() {
                 )}
               </div>
             ) : (
-              /* Sohbet Alanı (Yazışma) */
               <div className="flex-1 flex flex-col h-full relative">
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6">
+                  
+                  {/* YENİ MESAJ LİSTELEME EKRANI (DÜZENLE/SİL BUTONLU) */}
                   {activeChatMessages.map(msg => (
-                    <div key={msg.id} className="flex items-start gap-3 md:gap-4">
+                    <div key={msg.id} className="flex items-start gap-3 md:gap-4 group relative">
                       <img src={msg.senderAvatar} className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-zinc-800 mt-1 object-cover flex-shrink-0" />
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-baseline gap-2 flex-wrap mb-1">
-                          <span className={`text-[13px] md:text-sm font-bold ${msg.senderId === currentUserProfile.uid ? 'text-indigo-400' : 'text-zinc-200'}`}>{msg.senderDisplayName}</span>
+                          <span className={`text-[13px] md:text-sm font-bold ${msg.senderId === currentUserProfile?.uid ? 'text-indigo-400' : 'text-zinc-200'}`}>{msg.senderDisplayName}</span>
                           <span className="text-[10px] text-zinc-500">@{msg.senderUsername} • {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                          {msg.isEdited && <span className="text-[9px] text-zinc-500 italic">(düzenlendi)</span>}
                         </div>
-                        <p className="text-sm text-zinc-300 break-words leading-relaxed">{msg.text}</p>
+                        
+                        {editingMessageId === msg.id ? (
+                          <form onSubmit={handleEditMessage} className="mt-2 flex items-center gap-2">
+                            <input autoFocus type="text" value={editMessageText} onChange={e => setEditMessageText(e.target.value)} className="w-full bg-[#1c1c21] border border-indigo-500/50 rounded-lg px-3 py-2 focus:outline-none text-sm text-white transition-all" />
+                            <button type="submit" className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg transition-all">Kaydet</button>
+                            <button type="button" onClick={() => setEditingMessageId(null)} className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-2 rounded-lg transition-all">İptal</button>
+                          </form>
+                        ) : (
+                          <p className="text-sm text-zinc-300 break-words leading-relaxed">{msg.text}</p>
+                        )}
                       </div>
+
+                      {msg.senderId === currentUserProfile?.uid && !editingMessageId && (
+                        <div className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 flex items-center gap-1 bg-[#161619]/90 backdrop-blur-sm p-1 rounded-lg border border-white/5 transition-opacity duration-200">
+                          <button onClick={() => { setEditingMessageId(msg.id); setEditMessageText(msg.text); }} className="p-1.5 text-zinc-400 hover:text-indigo-400 hover:bg-white/5 rounded-md transition-all" title="Düzenle">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                          </button>
+                          <button onClick={() => handleDeleteMessage(msg.id)} className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-white/5 rounded-md transition-all" title="Sil">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                   <div ref={messagesEndRef} />
                 </div>
                 
-                {/* Mesaj Gönderme Kutusu */}
                 <div className="p-3 md:p-4 bg-[#161619] relative z-20 shrink-0 border-t border-white/5">
                   <form onSubmit={handleSendMessage} className="relative flex items-center">
                     <input type="text" value={messageText} onChange={e => setMessageText(e.target.value)} placeholder="Mesajınızı yazınız..." className="w-full bg-[#1c1c21] border border-white/10 rounded-2xl pl-4 pr-14 py-3 md:py-4 focus:outline-none text-sm text-white placeholder-zinc-500 transition-all focus:border-indigo-500/50" />
@@ -810,8 +843,6 @@ export default function App() {
       </div>
 
       {/* --- MODALLAR --- */}
-      
-      {/* Profil Düzenleme ve HESAPLAR Modalı */}
       {showProfileModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative max-h-[90vh] overflow-y-auto no-scrollbar">
@@ -840,7 +871,6 @@ export default function App() {
               <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-all shadow-[0_0_10px_rgba(99,102,241,0.3)]">Görünümü Kaydet</button>
             </form>
             
-            {/* KAYITLI HESAPLAR LİSTESİ */}
             <div className="pt-4 border-t border-white/10">
               <p className="text-[10px] font-bold text-zinc-500 uppercase mb-3 ml-1 tracking-widest">Kayıtlı Hesaplar</p>
               
@@ -872,7 +902,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Sunucu Ekleme Modalı */}
       {showNewServerModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative">
@@ -888,7 +917,6 @@ export default function App() {
         </div>
       )}
       
-      {/* Kanal Ekleme Modalı */}
       {showNewChannelModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative">
