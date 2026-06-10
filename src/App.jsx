@@ -54,6 +54,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [newServerName, setNewServerName] = useState('');
   const [newChannelName, setNewChannelName] = useState('');
+  const [joinInviteCode, setJoinInviteCode] = useState(''); // Davet Kodu Girdisi
   
   // Profil Düzenleme
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -63,6 +64,7 @@ export default function App() {
   // Arayüz Kontrolleri
   const [showNewServerModal, setShowNewServerModal] = useState(false);
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
+  const [showJoinServerModal, setShowJoinServerModal] = useState(false); // Katılma Modalı
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
@@ -345,21 +347,56 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
+  // --- SUNUCU OLUŞTURMA (KOD ÜRETİMİ EKLENDİ) ---
   const handleCreateServer = async (e) => {
     e.preventDefault();
     if (!newServerName.trim() || !currentUserProfile) return;
     try {
+      const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase(); // Rastgele Kod Üretimi
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'servers'), {
         name: newServerName.trim(),
         icon: newServerName.trim().substring(0, 2).toUpperCase(),
         ownerId: currentUserProfile.uid,
-        channels: [{ id: 'genel', name: 'genel' }]
+        channels: [{ id: 'genel', name: 'genel' }],
+        inviteCode: inviteCode, // Kodu kaydet
+        members: [currentUserProfile.uid] // Kuran kişiyi üyeler listesine ekle
       });
       setNewServerName(''); setShowNewServerModal(false);
       setActiveTab(`server-${docRef.id}`); setActiveChannelId('genel');
       setIsMobileMenuOpen(false);
-      showNotification("Sunucu oluşturuldu!", "success");
+      showNotification("Sunucu oluşturuldu! Kodunuz: " + inviteCode, "success");
     } catch (err) {}
+  };
+
+  // --- SUNUCUYA KATILMA (KOD İLE) ---
+  const handleJoinServer = async (e) => {
+    e.preventDefault();
+    const code = joinInviteCode.trim().toUpperCase();
+    if (!code || !currentUserProfile) return;
+
+    const serverToJoin = allServers.find(s => s.inviteCode === code);
+    if (!serverToJoin) {
+      return showNotification("Böyle bir davet kodu bulunamadı!", "error");
+    }
+
+    if (serverToJoin.members?.includes(currentUserProfile.uid)) {
+      return showNotification("Zaten bu ağın içerisindesin!", "warning");
+    }
+
+    try {
+      const currentMembers = serverToJoin.members || [];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'servers', serverToJoin.id), {
+        members: [...currentMembers, currentUserProfile.uid]
+      });
+      setShowJoinServerModal(false);
+      setJoinInviteCode('');
+      showNotification("Ağa başarıyla katıldın!", "success");
+      setActiveTab(`server-${serverToJoin.id}`);
+      setActiveChannelId(serverToJoin.channels[0]?.id || 'genel');
+      setIsMobileMenuOpen(false);
+    } catch(err) {
+      showNotification("Bağlantı hatası.", "error");
+    }
   };
 
   const handleCreateChannel = async (e) => {
@@ -397,7 +434,6 @@ export default function App() {
     } catch (err) { showNotification("Mesaj iletilemedi", "error"); }
   };
 
-  // --- YENİ: MESAJ SİLME VE DÜZENLEME FONKSİYONLARI ---
   const handleDeleteMessage = async (msgId) => {
     if (!window.confirm("Bu mesajı silmek istediğine emin misin?")) return;
     try {
@@ -470,6 +506,12 @@ export default function App() {
     sent: allFriendRequests.filter(r => r.fromUid === currentUserProfile?.uid && r.status === 'pending')
   }), [allFriendRequests, currentUserProfile]);
   
+  // SUNUCU LİSTESİNİ KİŞİYE GÖRE FİLTRELEME
+  const myServersList = useMemo(() => {
+    if (!currentUserProfile) return [];
+    return allServers.filter(s => !s.members || s.members.includes(currentUserProfile.uid));
+  }, [allServers, currentUserProfile]);
+
   const activeChatMessages = useMemo(() => {
     if (activeTab.startsWith('server-')) return allMessages.filter(m => m.serverId === activeTab.replace('server-', '') && m.channelId === activeChannelId);
     if (activeTab === 'home' && activeDmRecipient) return allMessages.filter(m => m.serverId === 'dm' && ((m.senderId === currentUserProfile?.uid && m.channelId === activeDmRecipient.uid) || (m.senderId === activeDmRecipient.uid && m.channelId === currentUserProfile?.uid)));
@@ -608,14 +650,18 @@ export default function App() {
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
           </button>
           <div className="w-8 h-[2px] bg-white/5 rounded-full my-1" />
+          
+          {/* SUNUCU LİSTESİ */}
           <div className="flex-1 w-full overflow-y-auto flex flex-col items-center gap-3 no-scrollbar">
-            {allServers.map(server => (
+            {myServersList.map(server => (
               <button key={server.id} onClick={() => { setActiveTab(`server-${server.id}`); setActiveChannelId(server.channels[0]?.id || 'genel'); }} className={`relative group w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm transition-all duration-300 ${activeTab === `server-${server.id}` ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-[0_0_20px_rgba(99,102,241,0.6)]' : 'bg-[#18181b] text-zinc-400 hover:text-white'}`}>
                 <div className={`absolute -left-3 md:-left-4 w-1.5 bg-indigo-500 rounded-r-full transition-all ${activeTab === `server-${server.id}` ? 'h-8' : 'h-0 group-hover:h-4'}`} />
                 <span>{server.icon}</span>
               </button>
             ))}
-            <button onClick={() => setShowNewServerModal(true)} className="w-12 h-12 rounded-2xl bg-[#18181b] border border-white/5 text-emerald-400 hover:bg-emerald-500/10 hover:shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center justify-center transition-all"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg></button>
+            <div className="w-8 h-[2px] bg-white/5 rounded-full my-1" />
+            <button onClick={() => setShowNewServerModal(true)} className="w-12 h-12 rounded-2xl bg-[#18181b] border border-white/5 text-emerald-400 hover:bg-emerald-500/10 hover:shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center justify-center transition-all" title="Ağ Oluştur"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg></button>
+            <button onClick={() => setShowJoinServerModal(true)} className="w-12 h-12 rounded-2xl bg-[#18181b] border border-white/5 text-indigo-400 hover:bg-indigo-500/10 hover:shadow-[0_0_15px_rgba(99,102,241,0.3)] flex items-center justify-center transition-all" title="Ağa Katıl (Kod İle)"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg></button>
           </div>
         </div>
 
@@ -716,7 +762,25 @@ export default function App() {
               </span>
             )
           ) : (
-            <div className="flex items-center gap-2 font-bold text-base md:text-lg"><span className="text-indigo-500 text-xl md:text-2xl font-light">#</span><span className="text-white truncate">{activeServer?.channels.find(c => c.id === activeChannelId)?.name || 'genel'}</span></div>
+            <div className="flex items-center gap-2 font-bold text-base md:text-lg">
+              <span className="text-indigo-500 text-xl md:text-2xl font-light">#</span>
+              <span className="text-white truncate">{activeServer?.channels.find(c => c.id === activeChannelId)?.name || 'genel'}</span>
+              
+              {/* KOD KOPYALAMA BUTONU */}
+              {activeServer?.inviteCode && (
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(activeServer.inviteCode);
+                    showNotification("Davet kodu kopyalandı: " + activeServer.inviteCode, "success");
+                  }}
+                  className="ml-3 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] text-zinc-400 hover:text-white transition-all flex items-center gap-1 active:scale-95"
+                  title="Kodu kopyala arkadaşlarına at"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  Kod: {activeServer.inviteCode}
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -791,7 +855,6 @@ export default function App() {
               <div className="flex-1 flex flex-col h-full relative">
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6">
                   
-                  {/* YENİ MESAJ LİSTELEME EKRANI (DÜZENLE/SİL BUTONLU) */}
                   {activeChatMessages.map(msg => (
                     <div key={msg.id} className="flex items-start gap-3 md:gap-4 group relative">
                       <img src={msg.senderAvatar} className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-zinc-800 mt-1 object-cover flex-shrink-0" />
@@ -902,6 +965,7 @@ export default function App() {
         </div>
       )}
 
+      {/* AĞ OLUŞTURMA MODALI */}
       {showNewServerModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative">
@@ -911,6 +975,22 @@ export default function App() {
               <div className="flex gap-2">
                 <button type="button" onClick={() => setShowNewServerModal(false)} className="flex-1 py-3 bg-zinc-800 rounded-xl text-sm font-bold">İptal</button>
                 <button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold">Oluştur</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* AĞA KATILMA MODALI (YENİ) */}
+      {showJoinServerModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative">
+            <h3 className="text-xl font-bold mb-4 text-white">Ağa Katıl</h3>
+            <form onSubmit={handleJoinServer}>
+              <input type="text" value={joinInviteCode} onChange={e => setJoinInviteCode(e.target.value)} placeholder="Davet Kodunu Yazınız (Örn: A7X9P)" className="w-full bg-[#18181b] border border-white/10 rounded-xl px-4 py-3 mb-4 text-white text-sm focus:outline-none focus:border-indigo-500 uppercase" required />
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setShowJoinServerModal(false)} className="flex-1 py-3 bg-zinc-800 rounded-xl text-sm font-bold">İptal</button>
+                <button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold">Katıl</button>
               </div>
             </form>
           </div>
