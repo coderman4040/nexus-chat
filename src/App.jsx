@@ -425,14 +425,14 @@ export default function App() {
 
   // --- KİŞİ GİZLEME (X) VE ENGELLEME FONKSİYONLARI ---
   const toggleHideDM = async (e, friendUid, isHiding) => {
-    e.stopPropagation();
+    e.stopPropagation(); // Butona tıklayınca sohbetin açılmasını engeller
     if (!currentUserProfile) { return; }
     try {
       if (isHiding) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', currentUserProfile.uid), {
           hiddenDMs: arrayUnion(friendUid)
         });
-        showNotification("Sohbet geçmişten gizlendi.", "info");
+        showNotification("Sohbet yan menüden gizlendi.", "info");
         if (activeDmRecipient?.uid === friendUid) {
           setActiveDmRecipient(null);
         }
@@ -461,7 +461,7 @@ export default function App() {
       setActiveTab('home');
       setShowMembersList(false);
       
-      // Eğer tıklanan sohbet daha önce gizlendiyse, tıklandığı an gizlilik listesinden KALICI silinir
+      // Eğer tıklanan sohbet daha önce gizlendiyse, gizlilik listesinden çıkar
       if (currentUserProfile?.hiddenDMs?.includes(data.uid)) {
         try {
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', currentUserProfile.uid), {
@@ -755,13 +755,16 @@ export default function App() {
       return lastB - lastA;
     });
 
-    // Gizlenenleri filtrele (Ama okunmamış mesaj geldiyse gizli olsa da göster)
+    // Gizlenenleri filtrele
     return friends.filter((f) => {
       const isHidden = currentUserProfile.hiddenDMs && currentUserProfile.hiddenDMs.includes(f.uid);
       const unreadCount = getUnreadCount(f.uid);
-      return !isHidden || unreadCount > 0;
+      const isActive = activeDmRecipient?.uid === f.uid;
+      
+      // Eğer kişi gizli DEĞİLSE, VEYA okunmamış mesajı VARSA, VEYA şu an aktif sohbetteyse GÖSTER
+      return !isHidden || unreadCount > 0 || isActive;
     });
-  }, [allUsers, currentUserProfile, allMessages]);
+  }, [allUsers, currentUserProfile, allMessages, activeDmRecipient]);
 
   // Sunucu Listesini Sıralama (Son mesaja göre en üste taşır)
   const sortedServersList = useMemo(() => {
@@ -1070,7 +1073,7 @@ export default function App() {
                   </div>
                 )}
 
-                {/* BAĞLANTILARIM SEKME İÇERİĞİ */}
+                {/* BAĞLANTILARIM SEKME İÇERİĞİ (Arkadaşlık Listesi - Asla Silinmez) */}
                 {homeSubTab === 'friends' && (
                   <div className="max-w-4xl mx-auto space-y-3">
                     {myFriendsList.length === 0 ? <p className="text-center text-zinc-500 mt-10">Listeniz boş.</p> : myFriendsList.map((friend) => (
@@ -1078,4 +1081,215 @@ export default function App() {
                         <div className="flex items-center gap-4 min-w-0">
                           <img src={friend.avatar} className="w-12 h-12 rounded-full object-cover bg-zinc-800 shrink-0" />
                           <div className="flex flex-col min-w-0">
-                            <span className="text-base font-bold
+                            <span className="text-base font-bold text-white truncate">{friend.displayName}</span>
+                            <span className="text-xs text-zinc-400 truncate">@{friend.username}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          <button onClick={() => { selectChannelOrDm('dm', friend); }} className="flex-1 sm:flex-none px-5 py-2.5 bg-indigo-600/20 text-indigo-300 rounded-xl text-sm font-bold text-center">Mesaj Yaz</button>
+                          <button onClick={() => { handleBlockUser(friend.uid); }} className="px-3 py-2.5 bg-zinc-800 text-zinc-400 hover:text-rose-400 rounded-xl text-sm">Engel</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {homeSubTab === 'add-friend' && (
+                  <div className="max-w-2xl mx-auto space-y-6">
+                    <input type="text" value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); }} placeholder="Kullanıcı Ara" className="w-full bg-[#1c1c21] border border-white/10 rounded-2xl px-5 py-4 text-sm text-white outline-none" />
+                    <div className="space-y-3">
+                      {searchQuery && filteredSearchUsers.map((target) => (
+                        <div key={target.uid} className="flex items-center justify-between p-4 bg-[#1c1c21] rounded-2xl border border-white/5">
+                          <div className="flex items-center gap-3">
+                            <img src={target.avatar} className="w-10 h-10 rounded-full object-cover shrink-0" />
+                            <div className="flex flex-col"><span className="text-sm font-bold text-white">{target.displayName}</span><span className="text-xs text-zinc-400">@{target.username}</span></div>
+                          </div>
+                          <button onClick={() => { sendFriendRequest(target); }} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold">İstek At</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {homeSubTab === 'requests' && (
+                  <div className="max-w-2xl mx-auto space-y-6">
+                    {friendRequests.received.map((req) => (
+                      <div key={req.id} className="flex flex-col sm:flex-row justify-between p-4 bg-[#1c1c21] rounded-2xl border border-indigo-500/30 gap-3">
+                        <div className="flex flex-col"><span className="text-base font-bold text-white">{req.fromDisplayName}</span><span className="text-xs text-zinc-400">@{req.fromUsername}</span></div>
+                        <div className="flex gap-2"><button onClick={() => { acceptFriendRequest(req); }} className="px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded-xl text-xs font-bold">Kabul</button><button onClick={() => { declineFriendRequest(req); }} className="px-4 py-2 bg-rose-500/10 text-rose-400 rounded-xl text-xs font-bold">Reddet</button></div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col h-full relative overflow-hidden">
+                <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+                  {activeChatMessages.map((msg) => {
+                    const senderUser = allUsers.find((u) => { return u.uid === msg.senderId; });
+                    const serverRole = activeServer?.memberRoles?.[msg.senderId];
+                    const rName = serverRole?.name || senderUser?.rankName;
+                    const rColor = serverRole?.color || senderUser?.rankColor || '';
+
+                    return (
+                      <div key={msg.id} className="flex items-start gap-3 group relative">
+                        <img src={msg.senderAvatar} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2 flex-wrap mb-0.5">
+                            {/* İsim Rengi Sabit Kalıyor */}
+                            <span className={`text-[13px] font-bold ${msg.senderId === currentUserProfile?.uid ? 'text-indigo-400' : 'text-zinc-100'}`}>
+                              {msg.senderDisplayName}
+                            </span>
+                            {rName && <span className="text-[9px] font-extrabold px-1.5 py-[1px] rounded border" style={{ borderColor: rColor, color: rColor }}>{rName}</span>}
+                            <span className="text-[10px] text-zinc-500">{new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                          </div>
+                          {editingMessageId === msg.id ? (
+                            <form onSubmit={handleEditMessage} className="mt-1 flex items-center gap-2">
+                              <input autoFocus type="text" value={editMessageText} onChange={(e) => { setEditMessageText(e.target.value); }} className="w-full bg-[#1c1c21] border border-indigo-500/50 rounded-lg px-3 py-1.5 text-sm text-white outline-none" />
+                              <button type="submit" className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg">Kaydet</button>
+                            </form>
+                          ) : (
+                            /* Sadece Sohbet Yazısının Rengi Değişiyor */
+                            <p className="text-sm break-words leading-relaxed" style={{ color: rName ? rColor : '#d4d4d8' }}>{msg.text}</p>
+                          )}
+                        </div>
+                        {!editingMessageId && (
+                          <div className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 flex items-center gap-1 bg-[#161619]/90 p-1 rounded-lg border border-white/5">
+                            {msg.senderId === currentUserProfile?.uid && (
+                              <>
+                                <button onClick={() => { setEditingMessageId(msg.id); setEditMessageText(msg.text); }} className="p-1 text-zinc-400">✏️</button>
+                                <button onClick={() => { handleDeleteForAll(msg.id); }} className="p-1 text-rose-400">🗑️</button>
+                              </>
+                            )}
+                            <button onClick={() => { handleDeleteForMe(msg.id); }} className="p-1 text-amber-400">👁️‍🗨️</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+                <div className="p-3 bg-[#161619] border-t border-white/5">
+                  <form onSubmit={handleSendMessage} className="relative flex items-center">
+                    <input type="text" value={messageText} onChange={(e) => { setMessageText(e.target.value); }} placeholder="Mesaj yaz..." className="w-full bg-[#1c1c21] border border-white/10 rounded-2xl pl-4 pr-12 py-3 focus:outline-none text-sm text-white" />
+                    <button type="submit" disabled={!messageText.trim()} className="absolute right-2 p-2 bg-indigo-600 rounded-xl text-white disabled:opacity-0">🚀</button>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* SAĞ PANEL: SUNUCU ÜYELERİ VE ROL VERME PANELİ */}
+          {activeTab.startsWith('server-') && showMembersList && (
+            <div className="w-[240px] bg-[#121214] border-l border-white/5 flex flex-col h-full shrink-0 z-20 absolute right-0 md:relative">
+              <div className="h-14 border-b border-white/5 flex items-center px-4 font-bold text-sm text-zinc-300">Üyeler ({activeServer?.members?.length || 0})</div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-4">
+                <div>
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 px-1">Kurucu</div>
+                  {allUsers.filter((u) => { return u.uid === activeServer?.ownerId; }).map((u) => (
+                    <div key={u.uid} className="flex items-center gap-3 px-2 py-1.5"><img src={u.avatar} className="w-8 h-8 rounded-full object-cover shrink-0" /><span className="text-[13px] font-bold text-white truncate">{u.displayName} 👑</span></div>
+                  ))}
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 px-1">Üyeler</div>
+                  {allUsers.filter((u) => { return activeServer?.members?.includes(u.uid) && u.uid !== activeServer?.ownerId; }).map((u) => {
+                    const sRole = activeServer?.memberRoles?.[u.uid];
+                    return (
+                      <div key={u.uid} className="flex flex-col gap-1 mb-3">
+                        <div className="flex items-center gap-3 px-2 py-1 hover:bg-white/5 rounded-lg">
+                          <img src={u.avatar} className="w-8 h-8 rounded-full object-cover shrink-0" />
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-[13px] font-bold text-white truncate">{u.displayName}</span>
+                            {sRole && <span className="text-[9px] font-bold truncate" style={{ color: sRole.color }}>{sRole.name}</span>}
+                          </div>
+                        </div>
+                        {/* SUNUCU SAHİBİNİN KİŞİLERE ROL VERME AYARI */}
+                        {activeServer?.ownerId === currentUserProfile?.uid && (
+                          <div className="flex items-center gap-1 px-2 opacity-60 hover:opacity-100 transition-opacity">
+                            <input type="text" id={`serverRankName-${u.uid}`} defaultValue={sRole?.name || ''} placeholder="Rol" className="bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-white w-full outline-none" />
+                            <input type="color" id={`serverRankColor-${u.uid}`} defaultValue={sRole?.color || '#ffffff'} className="w-5 h-5 rounded bg-transparent cursor-pointer shrink-0" />
+                            <button onClick={() => { handleSetServerRole(u.uid); }} className="bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0">Ver</button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* --- AYARLAR VE MODALLAR --- */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 max-h-[90vh] overflow-y-auto no-scrollbar">
+            <div className="flex justify-between items-center mb-6"><h3 className="text-xl font-bold text-white">Hesap Ayarları</h3><button onClick={() => { setShowProfileModal(false); }} className="text-zinc-500 text-2xl">&times;</button></div>
+            <form onSubmit={handleUpdateProfile} className="space-y-4 mb-6">
+              <div><label className="text-[10px] font-bold text-zinc-500 uppercase">Görünür İsim</label><input type="text" value={editDisplayName} onChange={(e) => { setEditDisplayName(e.target.value); }} className="w-full bg-[#18181b] border border-white/10 rounded-xl px-4 py-3 text-white text-sm outline-none" /></div>
+              <div>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase">Profil Resmi</label>
+                <div className="flex items-center gap-4 mt-2 bg-[#18181b] p-3 rounded-xl border border-white/10">
+                  <img src={editAvatarUrl || currentUserProfile?.avatar} className="w-14 h-14 rounded-full object-cover" />
+                  <label className="px-4 py-2 bg-indigo-500/20 text-indigo-300 rounded-lg text-sm font-bold cursor-pointer flex-1 text-center">Seç<input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} /></label>
+                </div>
+              </div>
+              <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold">Kaydet</button>
+            </form>
+            <div className="pt-4 border-t border-white/10">
+              <p className="text-[10px] font-bold text-zinc-500 uppercase mb-3 tracking-widest">Kayıtlı Hesaplar</p>
+              <div className="space-y-2 mb-4">
+                {savedAccounts.map((acc) => (
+                  <div key={acc.uid} className={`flex items-center justify-between p-2.5 rounded-xl border ${acc.uid === currentUserProfile.uid ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-[#18181b] border-white/5'}`}>
+                    <div className="flex items-center gap-3"><img src={acc.avatar} className="w-8 h-8 rounded-full object-cover" /><span className="text-sm font-bold text-white truncate">{acc.displayName}</span></div>
+                    {acc.uid !== currentUserProfile.uid ? (<button onClick={() => { handleQuickLogin(acc.uid); }} className="px-3 py-1.5 bg-zinc-800 rounded-lg text-xs font-bold text-white">Geçiş</button>) : (<span className="px-2 py-1 text-[10px] text-indigo-400 bg-indigo-500/20 rounded-md">Aktif</span>)}
+                  </div>
+                ))}
+              </div>
+              <button onClick={handleLogout} className="w-full py-3 bg-zinc-800 text-zinc-300 rounded-xl text-sm font-bold">Çıkış Yap</button>
+              <button onClick={handleDeleteAccount} className="w-full py-3 mt-4 border border-rose-500/30 hover:bg-rose-500/10 text-rose-500 rounded-xl text-sm font-bold">Hesabımı Kalıcı Olarak Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNewServerModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6">
+            <h3 className="text-xl font-bold mb-4 text-white">Ağ Oluştur</h3>
+            <form onSubmit={handleCreateServer}>
+              <input type="text" value={newServerName} onChange={(e) => { setNewServerName(e.target.value); }} placeholder="Sunucu Adı" className="w-full bg-[#18181b] border border-white/10 rounded-xl px-4 py-3 mb-4 text-white text-sm outline-none" required />
+              <div className="flex gap-2"><button type="button" onClick={() => { setShowNewServerModal(false); }} className="flex-1 py-3 bg-zinc-800 rounded-xl text-sm font-bold">İptal</button><button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold">Oluştur</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showJoinServerModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6">
+            <h3 className="text-xl font-bold mb-4 text-white">Ağa Katıl</h3>
+            <form onSubmit={handleJoinServer}>
+              <input type="text" value={joinInviteCode} onChange={(e) => { setJoinInviteCode(e.target.value); }} placeholder="Davet Kodu" className="w-full bg-[#18181b] border border-white/10 rounded-xl px-4 py-3 mb-4 text-white text-sm outline-none uppercase" required />
+              <div className="flex gap-2"><button type="button" onClick={() => { setShowJoinServerModal(false); }} className="flex-1 py-3 bg-zinc-800 rounded-xl text-sm font-bold">İptal</button><button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold">Katıl</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+      
+      {showNewChannelModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6">
+            <h3 className="text-xl font-bold mb-4 text-white">Kanal Aç</h3>
+            <form onSubmit={handleCreateChannel}>
+              <input type="text" value={newChannelName} onChange={(e) => { setNewChannelName(e.target.value); }} placeholder="Kanal Adı" className="w-full bg-[#18181b] border border-white/10 rounded-xl px-4 py-3 mb-4 text-white text-sm outline-none" required />
+              <div className="flex gap-2"><button type="button" onClick={() => { setShowNewChannelModal(false); }} className="flex-1 py-3 bg-zinc-800 rounded-xl text-sm font-bold">İptal</button><button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold">Oluştur</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
