@@ -80,6 +80,9 @@ export default function App() {
     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
   };
 
+  // --- ADMİN KONTROLÜ (Sadece "1yigitt1_" Kullanıcısı) ---
+  const isAdmin = currentUserProfile?.username === '1yigitt1_';
+
   // 1. FIREBASE AUTHENTICATION
   useEffect(() => {
     const initAuth = async () => {
@@ -208,7 +211,8 @@ export default function App() {
         password: passwordInput,
         avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanUser)}`,
         status: 'online',
-        friends: []
+        friends: [],
+        banned: false // Ban sistemi için eklendi
       };
       
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', newProfileId), newProfile);
@@ -230,6 +234,8 @@ export default function App() {
     const foundUser = allUsers.find(u => u.username === cleanUser && u.password === passwordInput);
     
     if (foundUser) {
+      if (foundUser.banned) return showNotification("Bu hesap sistemden yasaklanmıştır!", "error");
+      
       try {
         await saveAccountToDevice(foundUser);
         setUsernameInput(''); setPasswordInput('');
@@ -244,6 +250,9 @@ export default function App() {
 
   const handleQuickLogin = async (accountUid) => {
     if (!user) return;
+    const targetUser = allUsers.find(u => u.uid === accountUid);
+    if (targetUser?.banned) return showNotification("Bu hesap sistemden yasaklanmıştır!", "error");
+
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'device_sessions', user.uid), {
         profileUid: accountUid,
@@ -265,7 +274,7 @@ export default function App() {
       setUsernameInput('');
       setPasswordInput('');
       setDisplayNameInput('');
-      showNotification("Hesabınızdan güvenle çıkış yapıldı.", "info");
+      showNotification("Hesabınızdan çıkış yapıldı.", "info");
     } catch (err) {
       showNotification("Çıkış yapılamadı.", "error");
     }
@@ -347,6 +356,36 @@ export default function App() {
     setIsMobileMenuOpen(false);
   };
 
+  // --- ADMİN PANELİ FONKSİYONLARI ---
+  const handleSetRank = async (targetUid) => {
+    const rName = document.getElementById(`rankName-${targetUid}`).value.trim();
+    const rColor = document.getElementById(`rankColor-${targetUid}`).value;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUid), {
+        rankName: rName,
+        rankColor: rName ? rColor : null
+      });
+      showNotification("Rütbe başarıyla atandı!", "success");
+    } catch(err) {
+      showNotification("Rütbe atanamadı.", "error");
+    }
+  };
+
+  const handleBanUser = async (targetUid) => {
+    if (!window.confirm("Bu kullanıcıyı platformdan tamamen banlamak istediğine emin misin?")) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUid), { banned: true });
+      showNotification("Kullanıcı başarıyla banlandı 🔨", "success");
+    } catch(err) {}
+  };
+
+  const handleUnbanUser = async (targetUid) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', targetUid), { banned: false });
+      showNotification("Kullanıcının banı kaldırıldı.", "info");
+    } catch(err) {}
+  };
+
   // --- SUNUCU İŞLEMLERİ ---
   const handleCreateServer = async (e) => {
     e.preventDefault();
@@ -393,12 +432,9 @@ export default function App() {
       setActiveTab(`server-${serverToJoin.id}`);
       setActiveChannelId(serverToJoin.channels[0]?.id || 'genel');
       setIsMobileMenuOpen(false);
-    } catch(err) {
-      showNotification("Bağlantı hatası.", "error");
-    }
+    } catch(err) {}
   };
 
-  // SUNUCU SİLME (SADECE KURUCU)
   const handleDeleteServer = async () => {
     if (!activeServer || activeServer.ownerId !== currentUserProfile?.uid) return;
     
@@ -411,9 +447,7 @@ export default function App() {
       setActiveTab('home');
       setActiveChannelId('genel');
       showNotification("Ağ başarıyla silindi.", "success");
-    } catch (err) {
-      showNotification("Ağ silinirken bir hata oluştu.", "error");
-    }
+    } catch (err) {}
   };
 
   const handleCreateChannel = async (e) => {
@@ -432,7 +466,7 @@ export default function App() {
     } catch (err) {}
   };
 
-  // --- MESAJ İŞLEMLERİ (HERKESTEN SİL & BENDEN SİL EKLENDİ) ---
+  // --- MESAJ İŞLEMLERİ ---
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!messageText.trim() || !currentUserProfile) return;
@@ -447,32 +481,26 @@ export default function App() {
         senderAvatar: currentUserProfile.avatar,
         text: messageText.trim(),
         timestamp: Date.now(),
-        deletedFor: [] // Başlangıçta kimse silmemiş
+        deletedFor: [] 
       });
       setMessageText('');
-    } catch (err) { showNotification("Mesaj iletilemedi", "error"); }
+    } catch (err) {}
   };
 
-  // SADECE BENDEN SİL
   const handleDeleteForMe = async (msgId) => {
     try {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId), {
         deletedFor: arrayUnion(currentUserProfile.uid)
       });
-    } catch (err) {
-      showNotification("Mesaj ekranınızdan kaldırılamadı.", "error");
-    }
+    } catch (err) {}
   };
 
-  // HERKESTEN SİL (KÖKTEN)
   const handleDeleteForAll = async (msgId) => {
     if (!window.confirm("Bu mesajı herkesten silmek istediğine emin misin?")) return;
     try {
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId));
       showNotification("Mesaj herkesten silindi.", "info");
-    } catch (err) {
-      showNotification("Mesaj silinemedi.", "error");
-    }
+    } catch (err) {}
   };
 
   const handleEditMessage = async (e) => {
@@ -486,9 +514,7 @@ export default function App() {
       setEditingMessageId(null);
       setEditMessageText('');
       showNotification("Mesaj düzenlendi.", "success");
-    } catch (err) {
-      showNotification("Mesaj düzenlenemedi.", "error");
-    }
+    } catch (err) {}
   };
 
   // --- ARKADAŞLIK SİSTEMİ ---
@@ -548,7 +574,6 @@ export default function App() {
     if (activeTab.startsWith('server-')) msgs = allMessages.filter(m => m.serverId === activeTab.replace('server-', '') && m.channelId === activeChannelId);
     if (activeTab === 'home' && activeDmRecipient) msgs = allMessages.filter(m => m.serverId === 'dm' && ((m.senderId === currentUserProfile?.uid && m.channelId === activeDmRecipient.uid) || (m.senderId === activeDmRecipient.uid && m.channelId === currentUserProfile?.uid)));
     
-    // "Benden sil" diyenleri o mesaji görmekten men et
     return msgs.filter(m => !(m.deletedFor && m.deletedFor.includes(currentUserProfile?.uid)));
   }, [allMessages, activeTab, activeChannelId, activeDmRecipient, currentUserProfile]);
   
@@ -560,6 +585,22 @@ export default function App() {
       <div className="h-screen w-full flex flex-col items-center justify-center bg-[#09090b] relative overflow-hidden">
         <div className="absolute w-[300px] h-[300px] bg-indigo-600/20 rounded-full blur-[100px] animate-pulse"></div>
         <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin z-10"></div>
+      </div>
+    );
+  }
+
+  // YASAKLI KULLANICI EKRANI (BAN)
+  if (currentUserProfile && currentUserProfile.banned) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#09090b] text-white font-sans p-4 text-center">
+        <div className="text-7xl mb-6 drop-shadow-[0_0_20px_rgba(244,63,94,0.6)]">🔨</div>
+        <h1 className="text-4xl font-black text-rose-500 mb-3 tracking-widest">HESABINIZ YASAKLANDI</h1>
+        <p className="text-zinc-400 max-w-md mb-8 leading-relaxed">
+          Platform kurallarını ihlal ettiğiniz tespit edildiği için sunucu yöneticisi tarafından uzaklaştırıldınız. NEXUS ağına erişiminiz kalıcı olarak kapatılmıştır.
+        </p>
+        <button onClick={handleLogout} className="px-8 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-bold transition-all shadow-lg">
+          Hesaptan Çıkış Yap
+        </button>
       </div>
     );
   }
@@ -685,7 +726,6 @@ export default function App() {
           </button>
           <div className="w-8 h-[2px] bg-white/5 rounded-full my-1" />
           
-          {/* SUNUCU LİSTESİ */}
           <div className="flex-1 w-full overflow-y-auto flex flex-col items-center gap-3 no-scrollbar">
             {myServersList.map(server => (
               <button key={server.id} onClick={() => { setActiveTab(`server-${server.id}`); setActiveChannelId(server.channels[0]?.id || 'genel'); }} className={`relative group w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm transition-all duration-300 ${activeTab === `server-${server.id}` ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-[0_0_20px_rgba(99,102,241,0.6)]' : 'bg-[#18181b] text-zinc-400 hover:text-white'}`}>
@@ -714,6 +754,13 @@ export default function App() {
                   {friendRequests.received.length > 0 && <span className="bg-rose-500/20 text-rose-400 text-xs px-2 rounded-full">{friendRequests.received.length}</span>}
                 </button>
                 
+                {/* --- ADMİN PANELİ BUTONU --- */}
+                {isAdmin && (
+                  <button onClick={() => { setHomeSubTab('admin'); setActiveDmRecipient(null); setIsMobileMenuOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-semibold text-sm transition-all mt-4 border ${homeSubTab === 'admin' && !activeDmRecipient ? 'bg-rose-500/15 text-rose-400 border-rose-500/30 shadow-[0_0_15px_rgba(244,63,94,0.3)]' : 'text-zinc-400 hover:bg-white/5 border-transparent'}`}>
+                    👑 Yönetici Paneli
+                  </button>
+                )}
+
                 <div className="pt-4">
                   <div className="px-3 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">Direkt Mesajlar</div>
                   <div className="space-y-0.5">
@@ -755,7 +802,9 @@ export default function App() {
                 <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#0a0a0c] ${currentUserProfile.status === 'online' ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : currentUserProfile.status === 'idle' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
               </div>
               <div className="min-w-0 flex-1 flex flex-col justify-center">
-                <div className="text-sm font-bold truncate text-zinc-200">{currentUserProfile.displayName}</div>
+                <div className="text-sm font-bold truncate text-zinc-200" style={{ color: currentUserProfile.rankColor || undefined }}>
+                  {currentUserProfile.displayName}
+                </div>
                 <div className="text-[10px] text-zinc-500 truncate">@{currentUserProfile.username}</div>
               </div>
             </div>
@@ -787,12 +836,16 @@ export default function App() {
 
           {activeTab === 'home' ? (
             activeDmRecipient ? (
-              <div className="flex items-center gap-2 font-bold text-base md:text-lg"><img src={activeDmRecipient.avatar} className="w-7 h-7 rounded-full object-cover" /><span className="text-white truncate">{activeDmRecipient.displayName}</span></div>
+              <div className="flex items-center gap-2 font-bold text-base md:text-lg">
+                <img src={activeDmRecipient.avatar} className="w-7 h-7 rounded-full object-cover" />
+                <span className="text-white truncate" style={{ color: activeDmRecipient.rankColor || undefined }}>{activeDmRecipient.displayName}</span>
+              </div>
             ) : (
               <span className="text-zinc-300 font-bold text-base md:text-lg tracking-wide">
                 {homeSubTab === 'friends' && 'Bağlantılarım'}
                 {homeSubTab === 'add-friend' && 'Yeni Kişiler'}
                 {homeSubTab === 'requests' && 'Bekleyen İstekler'}
+                {homeSubTab === 'admin' && <span className="text-rose-400">Yönetici Paneli</span>}
               </span>
             )
           ) : (
@@ -800,7 +853,6 @@ export default function App() {
               <span className="text-indigo-500 text-xl md:text-2xl font-light">#</span>
               <span className="text-white truncate">{activeServer?.channels.find(c => c.id === activeChannelId)?.name || 'genel'}</span>
               
-              {/* KOD KOPYALAMA BUTONU */}
               {activeServer?.inviteCode && (
                 <button 
                   onClick={() => {
@@ -808,14 +860,13 @@ export default function App() {
                     showNotification("Davet kodu kopyalandı: " + activeServer.inviteCode, "success");
                   }}
                   className="ml-3 px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] text-zinc-400 hover:text-white transition-all flex items-center gap-1 active:scale-95"
-                  title="Kodu kopyala arkadaşlarına at"
+                  title="Kodu kopyala"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
                   Kod: {activeServer.inviteCode}
                 </button>
               )}
 
-              {/* AĞ SİLME BUTONU (SADECE KURUCUYA) */}
               {activeServer?.ownerId === currentUserProfile?.uid && (
                 <button 
                   onClick={handleDeleteServer}
@@ -834,6 +885,49 @@ export default function App() {
             {activeTab === 'home' && !activeDmRecipient ? (
               <div className="flex-1 overflow-y-auto p-4 md:p-8">
                 
+                {/* YÖNETİCİ PANELİ İÇERİĞİ */}
+                {homeSubTab === 'admin' && isAdmin && (
+                  <div className="max-w-4xl mx-auto space-y-4">
+                    <div className="bg-rose-500/10 border border-rose-500/20 p-6 rounded-2xl mb-6">
+                      <h2 className="text-xl font-black text-rose-400 tracking-widest mb-2">GİZLİ YÖNETİM MERKEZİ</h2>
+                      <p className="text-sm text-zinc-400">Buradan sitedeki herkesin rütbesini, rengini ayarlayabilir veya kuralları bozanları sonsuza dek banlayabilirsin.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                      {allUsers.map(u => (
+                        <div key={u.uid} className={`bg-[#1c1c21] p-4 rounded-xl border flex flex-col md:flex-row gap-4 items-center justify-between transition-all ${u.banned ? 'border-rose-500/50 opacity-80' : 'border-white/5 hover:border-white/10'}`}>
+                          
+                          <div className="flex items-center gap-3 w-full md:w-auto">
+                            <img src={u.avatar} className="w-12 h-12 rounded-full object-cover" />
+                            <div className="flex flex-col">
+                              <span className="font-bold text-base" style={{ color: u.rankColor || '#ffffff' }}>
+                                {u.displayName}
+                                {u.rankName && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded border" style={{ borderColor: u.rankColor, color: u.rankColor }}>{u.rankName}</span>}
+                                {u.banned && <span className="ml-2 text-xs text-rose-500 font-black">(YASAKLI)</span>}
+                              </span>
+                              <span className="text-xs text-zinc-500">@{u.username}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                            <input type="text" placeholder="Örn: Kurucu" id={`rankName-${u.uid}`} defaultValue={u.rankName || ''} className="bg-black/50 border border-white/10 rounded-lg px-3 py-2 text-sm w-32 text-white focus:border-indigo-500 outline-none" />
+                            <input type="color" id={`rankColor-${u.uid}`} defaultValue={u.rankColor || '#ffffff'} className="w-9 h-9 rounded bg-transparent cursor-pointer border border-white/10" title="Rütbe ve Yazı Rengi" />
+                            
+                            <button onClick={() => handleSetRank(u.uid)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-bold shadow-md transition-all">Rütbe Ver</button>
+                            
+                            {u.banned ? (
+                              <button onClick={() => handleUnbanUser(u.uid)} className="px-4 py-2 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg text-sm font-bold transition-all border border-emerald-500/30">Ban Kaldır</button>
+                            ) : (
+                              <button onClick={() => handleBanUser(u.uid)} disabled={u.username === '1yigitt1_'} className="px-4 py-2 bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded-lg text-sm font-bold transition-all border border-rose-500/30 disabled:opacity-50">Banla</button>
+                            )}
+                          </div>
+
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {homeSubTab === 'friends' && (
                   <div className="max-w-4xl mx-auto space-y-3">
                     {myFriendsList.length === 0 ? <p className="text-center text-zinc-500 mt-10">Listeniz boş.</p> : myFriendsList.map(friend => (
@@ -844,7 +938,10 @@ export default function App() {
                             <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#1c1c21] ${friend.status === 'online' ? 'bg-emerald-400' : friend.status === 'idle' ? 'bg-amber-400' : 'bg-zinc-500'}`} />
                           </div>
                           <div className="flex flex-col">
-                            <span className="text-base font-bold text-white">{friend.displayName}</span>
+                            <span className="text-base font-bold text-white" style={{ color: friend.rankColor || undefined }}>
+                              {friend.displayName}
+                              {friend.rankName && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded border align-middle" style={{ borderColor: friend.rankColor, color: friend.rankColor }}>{friend.rankName}</span>}
+                            </span>
                             <span className="text-xs text-zinc-400">@{friend.username}</span>
                           </div>
                         </div>
@@ -863,7 +960,10 @@ export default function App() {
                           <div className="flex items-center gap-3">
                             <img src={target.avatar} className="w-10 h-10 rounded-full object-cover" />
                             <div className="flex flex-col">
-                              <span className="text-sm font-bold text-white">{target.displayName}</span>
+                              <span className="text-sm font-bold" style={{ color: target.rankColor || '#ffffff' }}>
+                                {target.displayName}
+                                {target.rankName && <span className="ml-2 text-[10px] px-1 py-0.5 rounded border" style={{ borderColor: target.rankColor, color: target.rankColor }}>{target.rankName}</span>}
+                              </span>
                               <span className="text-xs text-zinc-400">@{target.username}</span>
                             </div>
                           </div>
@@ -900,53 +1000,72 @@ export default function App() {
               <div className="flex-1 flex flex-col h-full relative">
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6">
                   
-                  {activeChatMessages.map(msg => (
-                    <div key={msg.id} className="flex items-start gap-3 md:gap-4 group relative">
-                      <img src={msg.senderAvatar} className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-zinc-800 mt-1 object-cover flex-shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-2 flex-wrap mb-1">
-                          <span className={`text-[13px] md:text-sm font-bold ${msg.senderId === currentUserProfile?.uid ? 'text-indigo-400' : 'text-zinc-200'}`}>{msg.senderDisplayName}</span>
-                          <span className="text-[10px] text-zinc-500">@{msg.senderUsername} • {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                          {msg.isEdited && <span className="text-[9px] text-zinc-500 italic">(düzenlendi)</span>}
-                        </div>
-                        
-                        {editingMessageId === msg.id ? (
-                          <form onSubmit={handleEditMessage} className="mt-2 flex items-center gap-2">
-                            <input autoFocus type="text" value={editMessageText} onChange={e => setEditMessageText(e.target.value)} className="w-full bg-[#1c1c21] border border-indigo-500/50 rounded-lg px-3 py-2 focus:outline-none text-sm text-white transition-all" />
-                            <button type="submit" className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg transition-all">Kaydet</button>
-                            <button type="button" onClick={() => setEditingMessageId(null)} className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-2 rounded-lg transition-all">İptal</button>
-                          </form>
-                        ) : (
-                          <p className="text-sm text-zinc-300 break-words leading-relaxed">{msg.text}</p>
-                        )}
-                      </div>
+                  {activeChatMessages.map(msg => {
+                    // Mesajı gönderenin güncel rütbe bilgilerini alıyoruz
+                    const senderUser = allUsers.find(u => u.uid === msg.senderId);
+                    const rName = senderUser?.rankName;
+                    const rColor = senderUser?.rankColor || '';
 
-                      {/* YENİ MESAJ MENÜSÜ */}
-                      {!editingMessageId && (
-                        <div className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 flex items-center gap-1 bg-[#161619]/90 backdrop-blur-sm p-1 rounded-lg border border-white/5 transition-opacity duration-200">
+                    return (
+                      <div key={msg.id} className="flex items-start gap-3 md:gap-4 group relative">
+                        <img src={msg.senderAvatar} className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-zinc-800 mt-1 object-cover flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
                           
-                          {/* Sadece Kendi Mesajlarında Çıkanlar */}
-                          {msg.senderId === currentUserProfile?.uid && (
-                            <>
-                              <button onClick={() => { setEditingMessageId(msg.id); setEditMessageText(msg.text); }} className="p-1.5 text-zinc-400 hover:text-indigo-400 hover:bg-white/5 rounded-md transition-all" title="Düzenle">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                              </button>
-                              <button onClick={() => handleDeleteForAll(msg.id)} className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-white/5 rounded-md transition-all" title="Herkesten Sil">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                              </button>
-                            </>
+                          <div className="flex items-baseline gap-2 flex-wrap mb-1">
+                            <span 
+                              className={`text-[13px] md:text-sm font-bold ${!rName && msg.senderId === currentUserProfile?.uid ? 'text-indigo-400' : 'text-zinc-200'}`} 
+                              style={{ color: rName ? rColor : undefined }}
+                            >
+                              {msg.senderDisplayName}
+                            </span>
+                            
+                            {rName && (
+                              <span className="text-[9px] font-extrabold px-1.5 py-[1px] rounded border" style={{ borderColor: rColor, color: rColor }}>
+                                {rName}
+                              </span>
+                            )}
+
+                            <span className="text-[10px] text-zinc-500">@{msg.senderUsername} • {new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                            {msg.isEdited && <span className="text-[9px] text-zinc-500 italic">(düzenlendi)</span>}
+                          </div>
+                          
+                          {editingMessageId === msg.id ? (
+                            <form onSubmit={handleEditMessage} className="mt-2 flex items-center gap-2">
+                              <input autoFocus type="text" value={editMessageText} onChange={e => setEditMessageText(e.target.value)} className="w-full bg-[#1c1c21] border border-indigo-500/50 rounded-lg px-3 py-2 focus:outline-none text-sm text-white transition-all" />
+                              <button type="submit" className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg transition-all">Kaydet</button>
+                              <button type="button" onClick={() => setEditingMessageId(null)} className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-2 rounded-lg transition-all">İptal</button>
+                            </form>
+                          ) : (
+                            <p className="text-sm break-words leading-relaxed mt-0.5" style={{ color: rName ? rColor : '#d4d4d8' }}>
+                              {msg.text}
+                            </p>
                           )}
-                          
-                          {/* Herkesin Kendi Ekranından Silebilmesi İçin */}
-                          <button onClick={() => handleDeleteForMe(msg.id)} className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-white/5 rounded-md transition-all" title="Sadece Benden Sil">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                          </button>
-
                         </div>
-                      )}
 
-                    </div>
-                  ))}
+                        {!editingMessageId && (
+                          <div className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 flex items-center gap-1 bg-[#161619]/90 backdrop-blur-sm p-1 rounded-lg border border-white/5 transition-opacity duration-200">
+                            
+                            {msg.senderId === currentUserProfile?.uid && (
+                              <>
+                                <button onClick={() => { setEditingMessageId(msg.id); setEditMessageText(msg.text); }} className="p-1.5 text-zinc-400 hover:text-indigo-400 hover:bg-white/5 rounded-md transition-all" title="Düzenle">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                </button>
+                                <button onClick={() => handleDeleteForAll(msg.id)} className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-white/5 rounded-md transition-all" title="Herkesten Sil">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                              </>
+                            )}
+                            
+                            <button onClick={() => handleDeleteForMe(msg.id)} className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-white/5 rounded-md transition-all" title="Sadece Benden Sil">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                            </button>
+
+                          </div>
+                        )}
+
+                      </div>
+                    );
+                  })}
                   <div ref={messagesEndRef} />
                 </div>
                 
@@ -1024,7 +1143,6 @@ export default function App() {
         </div>
       )}
 
-      {/* AĞ OLUŞTURMA MODALI */}
       {showNewServerModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative">
@@ -1040,7 +1158,6 @@ export default function App() {
         </div>
       )}
 
-      {/* AĞA KATILMA MODALI */}
       {showJoinServerModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-3xl p-6 relative">
